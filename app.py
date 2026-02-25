@@ -17,9 +17,9 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    # File size protection (100MB)
+    # File size protection (500MB)
     if uploaded_file.size > 500 * 1024 * 1024:
-        st.error("File too large. Please upload file under 100MB.")
+        st.error("File too large. Please upload file under 500MB.")
         st.stop()
 
     # ============================
@@ -27,13 +27,15 @@ if uploaded_file is not None:
     # ============================
 
     if uploaded_file.name.endswith(".csv"):
-    raw_df = pd.read_csv(
-        uploaded_file,
-        low_memory=True,
-        dtype=str
-    )
-    
+
+        raw_df = pd.read_csv(
+            uploaded_file,
+            low_memory=True,
+            dtype=str
+        )
+
     else:
+
         excel_file = pd.ExcelFile(uploaded_file)
         sheet_names = excel_file.sheet_names
 
@@ -43,7 +45,11 @@ if uploaded_file is not None:
         )
 
         if st.button("Load Selected Sheet"):
-            raw_df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+            raw_df = pd.read_excel(
+                excel_file,
+                sheet_name=selected_sheet,
+                dtype=str
+            )
         else:
             st.stop()
 
@@ -152,12 +158,17 @@ if uploaded_file is not None:
 
     available_cols = [col for col in required_cols if col in raw_df.columns]
 
+    if len(available_cols) == 0:
+        st.error("Required columns not found in file.")
+        st.stop()
+
     case_log = raw_df[available_cols].copy()
 
     if "incident_id" in case_log.columns:
         case_log.rename(columns={"incident_id": "case_id"}, inplace=True)
 
-    case_log = case_log.drop_duplicates(subset=["case_id"])
+    if "case_id" in case_log.columns:
+        case_log = case_log.drop_duplicates(subset=["case_id"])
 
     st.success("Case Log Generated Successfully")
 
@@ -198,7 +209,7 @@ if uploaded_file is not None:
             "text/csv"
         )
 
-        # Optional Melt Version (only if safe)
+        # Optional Long Format
         if st.checkbox("Generate Long Event Log (May exceed Excel row limit)"):
 
             event_df = event_wide.copy()
