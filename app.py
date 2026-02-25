@@ -27,7 +27,11 @@ if uploaded_file is not None:
     # ============================
 
     if uploaded_file.name.endswith(".csv"):
-    raw_df = pd.read_csv(uploaded_file, low_memory=True)
+    raw_df = pd.read_csv(
+        uploaded_file,
+        low_memory=True,
+        dtype=str
+    )
     
     else:
         excel_file = pd.ExcelFile(uploaded_file)
