@@ -18,7 +18,7 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
 
     # File size protection (100MB)
-    if uploaded_file.size > 100 * 1024 * 1024:
+    if uploaded_file.size > 500 * 1024 * 1024:
         st.error("File too large. Please upload file under 100MB.")
         st.stop()
 
@@ -27,7 +27,8 @@ if uploaded_file is not None:
     # ============================
 
     if uploaded_file.name.endswith(".csv"):
-        raw_df = pd.read_csv(uploaded_file)
+    raw_df = pd.read_csv(uploaded_file, low_memory=True)
+    
     else:
         excel_file = pd.ExcelFile(uploaded_file)
         sheet_names = excel_file.sheet_names
