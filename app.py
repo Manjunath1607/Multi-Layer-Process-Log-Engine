@@ -14,37 +14,44 @@ uploaded_file = st.file_uploader(
     type=["csv", "xlsx", "xls", "xlsb"]
 )
 
+# =========================================================
+# CACHED FILE LOADER (MAJOR PERFORMANCE BOOST)
+# =========================================================
+
+@st.cache_data(show_spinner=True)
+def load_data(file, sheet_name=None, engine=None):
+    if file.name.endswith(".csv"):
+        return pd.read_csv(file, dtype=str, low_memory=True)
+
+    return pd.read_excel(
+        file,
+        sheet_name=sheet_name,
+        engine=engine,
+        dtype=str
+    )
+
+# =========================================================
+# PROCESS FILE
+# =========================================================
+
 if uploaded_file is not None:
 
-    # File size protection (500MB)
+    # File size check
     if uploaded_file.size > 500 * 1024 * 1024:
         st.error("File too large. Please upload file under 500MB.")
         st.stop()
 
     try:
-        # =========================================================
-        # LOAD FILE
-        # =========================================================
-
-        if uploaded_file.name.endswith(".csv"):
-
-            raw_df = pd.read_csv(
-                uploaded_file,
-                low_memory=True,
-                dtype=str
-            )
-
+        # Detect engine
+        if uploaded_file.name.endswith(".xlsb"):
+            engine_type = "pyxlsb"
+        elif uploaded_file.name.endswith((".xlsx", ".xls")):
+            engine_type = "openpyxl"
         else:
-            # Detect engine
-            if uploaded_file.name.endswith(".xlsb"):
-                try:
-                    engine_type = "pyxlsb"
-                except ImportError:
-                    st.error("pyxlsb is not installed. Please add it to requirements.txt")
-                    st.stop()
-            else:
-                engine_type = "openpyxl"
+            engine_type = None
 
+        # If Excel → choose sheet
+        if engine_type:
             excel_file = pd.ExcelFile(uploaded_file, engine=engine_type)
             sheet_names = excel_file.sheet_names
 
@@ -54,16 +61,20 @@ if uploaded_file is not None:
             )
 
             if st.button("Load Selected Sheet"):
-                raw_df = pd.read_excel(
-                    excel_file,
+                raw_df = load_data(
+                    uploaded_file,
                     sheet_name=selected_sheet,
-                    engine=engine_type,
-                    dtype=str
+                    engine=engine_type
                 )
             else:
                 st.stop()
 
+        else:
+            raw_df = load_data(uploaded_file)
+
         st.success("File Loaded Successfully")
+        st.write("Rows:", len(raw_df))
+        st.write("Columns:", len(raw_df.columns))
 
     except Exception as e:
         st.error(f"Error loading file: {e}")
@@ -84,17 +95,15 @@ if uploaded_file is not None:
     # REMOVE DUPLICATE INCIDENT
     # =========================================================
 
-    disposition_col = None
-    for col in raw_df.columns:
-        if "disposition" in col:
-            disposition_col = col
-            break
+    disposition_col = next(
+        (col for col in raw_df.columns if "disposition" in col),
+        None
+    )
 
     if disposition_col:
         raw_df = raw_df[
             ~raw_df[disposition_col]
             .astype(str)
-            .str.strip()
             .str.lower()
             .str.contains("duplicate incident", na=False)
         ]
@@ -109,67 +118,36 @@ if uploaded_file is not None:
     )
 
     # =========================================================
-    # CASE LOG CREATION
+    # CASE LOG
     # =========================================================
 
-    if layer == "SPF":
-        required_cols = [
-            "incident_id",
-            "incident_thread_id",
-            "category_id",
-            "status",
-            "status_type",
-            "sellerid",
-            "disposition_id",
-            "month",
-            "partner",
-            "tier",
-            "domain",
-            "spf_related_issues"
+    layer_columns = {
+        "SPF": [
+            "incident_id","incident_thread_id","category_id","status",
+            "status_type","sellerid","disposition_id","month",
+            "partner","tier","domain","spf_related_issues"
+        ],
+        "Closed": [
+            "incident_id","seller_id","category_id",
+            "count_of_inflow_seller_contacts","status","status_type",
+            "count_of_solved_status","disposition",
+            "time_spent_in_wsa(days)","time_spent_in_wsc(days)",
+            "time_spent_in_l1(days)","time_spent_inl2(days)",
+            "time_spent_in_l3(days)","closed_time_spent(days)",
+            "time_spent_in_l1wsa(days)","time_spent_in_l2wsa(days)",
+            "month","partner","tier","domain"
+        ],
+        "Reopen": [
+            "incident_id","issue_type","disposition","seller_id",
+            "status","month","partner","tier",
+            "count_repeat","esc/non_esc","domain"
         ]
+    }
 
-    elif layer == "Closed":
-        required_cols = [
-            "incident_id",
-            "seller_id",
-            "category_id",
-            "count_of_inflow_seller_contacts",
-            "status",
-            "status_type",
-            "count_of_solved_status",
-            "disposition",
-            "time_spent_in_wsa(days)",
-            "time_spent_in_wsc(days)",
-            "time_spent_in_l1(days)",
-            "time_spent_inl2(days)",
-            "time_spent_in_l3(days)",
-            "closed_time_spent(days)",
-            "time_spent_in_l1wsa(days)",
-            "time_spent_in_l2wsa(days)",
-            "month",
-            "partner",
-            "tier",
-            "domain"
-        ]
-
-    else:  # Reopen
-        required_cols = [
-            "incident_id",
-            "issue_type",
-            "disposition",
-            "seller_id",
-            "status",
-            "month",
-            "partner",
-            "tier",
-            "count_repeat",
-            "esc/non_esc",
-            "domain"
-        ]
-
+    required_cols = layer_columns[layer]
     available_cols = [col for col in required_cols if col in raw_df.columns]
 
-    if len(available_cols) == 0:
+    if not available_cols:
         st.error("Required columns not found in file.")
         st.stop()
 
@@ -181,7 +159,7 @@ if uploaded_file is not None:
     if "case_id" in case_log.columns:
         case_log = case_log.drop_duplicates(subset=["case_id"])
 
-    st.success("Case Log Generated Successfully")
+    st.success("Case Log Generated")
 
     st.download_button(
         "Download Case Log",
@@ -191,7 +169,7 @@ if uploaded_file is not None:
     )
 
     # =========================================================
-    # EVENT LOG CREATION
+    # EVENT LOG (WIDE)
     # =========================================================
 
     event_cols = [
@@ -202,14 +180,19 @@ if uploaded_file is not None:
         "incident_date_closed"
     ]
 
-    available_event_cols = [col for col in event_cols if col in raw_df.columns]
+    available_event_cols = [
+        col for col in event_cols if col in raw_df.columns
+    ]
 
     if len(available_event_cols) > 1:
 
         event_wide = raw_df[available_event_cols].copy()
 
         if "incident_id" in event_wide.columns:
-            event_wide.rename(columns={"incident_id": "case_id"}, inplace=True)
+            event_wide.rename(
+                columns={"incident_id": "case_id"},
+                inplace=True
+            )
 
         st.success("Event Wide Format Generated")
 
@@ -220,17 +203,20 @@ if uploaded_file is not None:
             "text/csv"
         )
 
-        # Optional Long Format
-        if st.checkbox("Generate Long Event Log (May exceed Excel row limit)"):
+        if st.checkbox("Generate Long Event Log"):
 
             event_df = event_wide.copy()
 
             timestamp_cols = [
-                col for col in event_df.columns if col != "case_id"
+                col for col in event_df.columns
+                if col != "case_id"
             ]
 
             for col in timestamp_cols:
-                event_df[col] = pd.to_datetime(event_df[col], errors="coerce")
+                event_df[col] = pd.to_datetime(
+                    event_df[col],
+                    errors="coerce"
+                )
 
             event_long = event_df.melt(
                 id_vars=["case_id"],
@@ -239,7 +225,9 @@ if uploaded_file is not None:
             )
 
             event_long = event_long.dropna(subset=["timestamp"])
-            event_long = event_long.sort_values(["case_id", "timestamp"])
+            event_long = event_long.sort_values(
+                ["case_id", "timestamp"]
+            )
 
             st.success("Long Event Log Generated")
 
