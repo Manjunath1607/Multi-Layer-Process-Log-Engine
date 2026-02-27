@@ -12,7 +12,7 @@ st.title("Multi-Layer Process Log Engineering Framework")
 
 uploaded_file = st.file_uploader(
     "Upload CSV or Excel file",
-    type=["csv", "xlsx", "xls"]
+    type=["csv", "xlsx", "xls", "xlsb"]
 )
 
 if uploaded_file is not None:
