@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 
 st.set_page_config(page_title="Multi-Layer Process Log Engine")
 
@@ -15,44 +16,57 @@ uploaded_file = st.file_uploader(
 )
 
 # =========================================================
-# CACHED FILE LOADER (MAJOR PERFORMANCE BOOST)
+# FAST LOADER WITH CACHE
 # =========================================================
 
 @st.cache_data(show_spinner=True)
-def load_data(file, sheet_name=None, engine=None):
+def load_file(file, sheet_name=None):
+    
+    # CSV → fastest path
     if file.name.endswith(".csv"):
         return pd.read_csv(file, dtype=str, low_memory=True)
 
-    return pd.read_excel(
+    # Excel → read once, convert in-memory
+    if file.name.endswith(".xlsb"):
+        engine_type = "pyxlsb"
+    else:
+        engine_type = "openpyxl"
+
+    df = pd.read_excel(
         file,
         sheet_name=sheet_name,
-        engine=engine,
+        engine=engine_type,
         dtype=str
     )
 
+    return df
+
+
 # =========================================================
-# PROCESS FILE
+# MAIN LOGIC
 # =========================================================
 
 if uploaded_file is not None:
 
-    # File size check
     if uploaded_file.size > 500 * 1024 * 1024:
-        st.error("File too large. Please upload file under 500MB.")
+        st.error("File too large (limit 500MB).")
         st.stop()
 
     try:
-        # Detect engine
-        if uploaded_file.name.endswith(".xlsb"):
-            engine_type = "pyxlsb"
-        elif uploaded_file.name.endswith((".xlsx", ".xls")):
-            engine_type = "openpyxl"
-        else:
-            engine_type = None
 
-        # If Excel → choose sheet
-        if engine_type:
+        # -----------------------------------------------------
+        # SHEET SELECTION (Only for Excel)
+        # -----------------------------------------------------
+
+        if uploaded_file.name.endswith((".xlsx", ".xls", ".xlsb")):
+
+            if uploaded_file.name.endswith(".xlsb"):
+                engine_type = "pyxlsb"
+            else:
+                engine_type = "openpyxl"
+
             excel_file = pd.ExcelFile(uploaded_file, engine=engine_type)
+
             sheet_names = excel_file.sheet_names
 
             selected_sheet = st.selectbox(
@@ -61,16 +75,14 @@ if uploaded_file is not None:
             )
 
             if st.button("Load Selected Sheet"):
-                raw_df = load_data(
-                    uploaded_file,
-                    sheet_name=selected_sheet,
-                    engine=engine_type
-                )
+
+                raw_df = load_file(uploaded_file, selected_sheet)
+
             else:
                 st.stop()
 
         else:
-            raw_df = load_data(uploaded_file)
+            raw_df = load_file(uploaded_file)
 
         st.success("File Loaded Successfully")
         st.write("Rows:", len(raw_df))
@@ -116,10 +128,6 @@ if uploaded_file is not None:
         "Select Data Layer",
         ["SPF", "Closed", "Reopen"]
     )
-
-    # =========================================================
-    # CASE LOG
-    # =========================================================
 
     layer_columns = {
         "SPF": [
@@ -169,7 +177,7 @@ if uploaded_file is not None:
     )
 
     # =========================================================
-    # EVENT LOG (WIDE)
+    # EVENT LOG
     # =========================================================
 
     event_cols = [
@@ -186,26 +194,21 @@ if uploaded_file is not None:
 
     if len(available_event_cols) > 1:
 
-        event_wide = raw_df[available_event_cols].copy()
+        event_df = raw_df[available_event_cols].copy()
 
-        if "incident_id" in event_wide.columns:
-            event_wide.rename(
-                columns={"incident_id": "case_id"},
-                inplace=True
-            )
+        if "incident_id" in event_df.columns:
+            event_df.rename(columns={"incident_id": "case_id"}, inplace=True)
 
         st.success("Event Wide Format Generated")
 
         st.download_button(
             "Download Event Wide Format",
-            event_wide.to_csv(index=False),
+            event_df.to_csv(index=False),
             f"{layer}_event_wide.csv",
             "text/csv"
         )
 
         if st.checkbox("Generate Long Event Log"):
-
-            event_df = event_wide.copy()
 
             timestamp_cols = [
                 col for col in event_df.columns
