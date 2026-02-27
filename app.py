@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 
 st.set_page_config(page_title="Multi-Layer Process Log Engine")
 
@@ -22,42 +21,57 @@ if uploaded_file is not None:
         st.error("File too large. Please upload file under 500MB.")
         st.stop()
 
-    # ============================
-    # LOAD FILE
-    # ============================
+    try:
+        # =========================================================
+        # LOAD FILE
+        # =========================================================
 
-    if uploaded_file.name.endswith(".csv"):
+        if uploaded_file.name.endswith(".csv"):
 
-        raw_df = pd.read_csv(
-            uploaded_file,
-            low_memory=True,
-            dtype=str
-        )
-
-    else:
-
-        excel_file = pd.ExcelFile(uploaded_file)
-        sheet_names = excel_file.sheet_names
-
-        selected_sheet = st.selectbox(
-            "Select Sheet to Process",
-            sheet_names
-        )
-
-        if st.button("Load Selected Sheet"):
-            raw_df = pd.read_excel(
-                excel_file,
-                sheet_name=selected_sheet,
+            raw_df = pd.read_csv(
+                uploaded_file,
+                low_memory=True,
                 dtype=str
             )
+
         else:
-            st.stop()
+            # Detect engine
+            if uploaded_file.name.endswith(".xlsb"):
+                try:
+                    engine_type = "pyxlsb"
+                except ImportError:
+                    st.error("pyxlsb is not installed. Please add it to requirements.txt")
+                    st.stop()
+            else:
+                engine_type = "openpyxl"
 
-    st.success("File Loaded Successfully")
+            excel_file = pd.ExcelFile(uploaded_file, engine=engine_type)
+            sheet_names = excel_file.sheet_names
 
-    # ============================
+            selected_sheet = st.selectbox(
+                "Select Sheet to Process",
+                sheet_names
+            )
+
+            if st.button("Load Selected Sheet"):
+                raw_df = pd.read_excel(
+                    excel_file,
+                    sheet_name=selected_sheet,
+                    engine=engine_type,
+                    dtype=str
+                )
+            else:
+                st.stop()
+
+        st.success("File Loaded Successfully")
+
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        st.stop()
+
+    # =========================================================
     # STANDARDIZE COLUMN NAMES
-    # ============================
+    # =========================================================
 
     raw_df.columns = (
         raw_df.columns
@@ -66,9 +80,9 @@ if uploaded_file is not None:
         .str.replace(" ", "_")
     )
 
-    # ============================
+    # =========================================================
     # REMOVE DUPLICATE INCIDENT
-    # ============================
+    # =========================================================
 
     disposition_col = None
     for col in raw_df.columns:
@@ -99,7 +113,6 @@ if uploaded_file is not None:
     # =========================================================
 
     if layer == "SPF":
-
         required_cols = [
             "incident_id",
             "incident_thread_id",
@@ -116,7 +129,6 @@ if uploaded_file is not None:
         ]
 
     elif layer == "Closed":
-
         required_cols = [
             "incident_id",
             "seller_id",
@@ -141,7 +153,6 @@ if uploaded_file is not None:
         ]
 
     else:  # Reopen
-
         required_cols = [
             "incident_id",
             "issue_type",
@@ -180,7 +191,7 @@ if uploaded_file is not None:
     )
 
     # =========================================================
-    # EVENT LOG (WIDE FORMAT - SAFE)
+    # EVENT LOG CREATION
     # =========================================================
 
     event_cols = [
