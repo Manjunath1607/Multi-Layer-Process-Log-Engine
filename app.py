@@ -3,37 +3,34 @@ import pandas as pd
 import io
 
 st.set_page_config(page_title="Multi-Layer Process Log Engine")
-
 st.title("Multi-Layer Process Log Engineering Framework")
-
-# =========================================================
-# FILE UPLOAD
-# =========================================================
 
 uploaded_file = st.file_uploader(
     "Upload CSV or Excel file",
     type=["csv", "xlsx", "xls", "xlsb"]
 )
 
-# =========================================================
+# ---------------------------------------------------------
 # FAST LOADER WITH CACHE
-# =========================================================
+# ---------------------------------------------------------
 
 @st.cache_data(show_spinner=True)
-def load_file(file, sheet_name=None):
-    
-    # CSV → fastest path
-    if file.name.endswith(".csv"):
-        return pd.read_csv(file, dtype=str, low_memory=True)
+def load_data(file_bytes, file_name, sheet_name=None):
 
-    # Excel → read once, convert in-memory
-    if file.name.endswith(".xlsb"):
+    file_buffer = io.BytesIO(file_bytes)
+
+    # CSV → fastest path
+    if file_name.endswith(".csv"):
+        return pd.read_csv(file_buffer, dtype=str, low_memory=True)
+
+    # Excel → read once
+    if file_name.endswith(".xlsb"):
         engine_type = "pyxlsb"
     else:
         engine_type = "openpyxl"
 
     df = pd.read_excel(
-        file,
+        file_buffer,
         sheet_name=sheet_name,
         engine=engine_type,
         dtype=str
@@ -42,10 +39,6 @@ def load_file(file, sheet_name=None):
     return df
 
 
-# =========================================================
-# MAIN LOGIC
-# =========================================================
-
 if uploaded_file is not None:
 
     if uploaded_file.size > 500 * 1024 * 1024:
@@ -53,36 +46,42 @@ if uploaded_file is not None:
         st.stop()
 
     try:
+        file_bytes = uploaded_file.read()
 
-        # -----------------------------------------------------
-        # SHEET SELECTION (Only for Excel)
-        # -----------------------------------------------------
-
+        # Excel → sheet selection
         if uploaded_file.name.endswith((".xlsx", ".xls", ".xlsb")):
 
+            # Determine engine
             if uploaded_file.name.endswith(".xlsb"):
                 engine_type = "pyxlsb"
             else:
                 engine_type = "openpyxl"
 
-            excel_file = pd.ExcelFile(uploaded_file, engine=engine_type)
-
-            sheet_names = excel_file.sheet_names
+            # Read sheet names
+            excel_file = pd.ExcelFile(
+                io.BytesIO(file_bytes),
+                engine=engine_type
+            )
 
             selected_sheet = st.selectbox(
                 "Select Sheet to Process",
-                sheet_names
+                excel_file.sheet_names
             )
 
             if st.button("Load Selected Sheet"):
-
-                raw_df = load_file(uploaded_file, selected_sheet)
-
+                raw_df = load_data(
+                    file_bytes,
+                    uploaded_file.name,
+                    selected_sheet
+                )
             else:
                 st.stop()
 
         else:
-            raw_df = load_file(uploaded_file)
+            raw_df = load_data(
+                file_bytes,
+                uploaded_file.name
+            )
 
         st.success("File Loaded Successfully")
         st.write("Rows:", len(raw_df))
@@ -92,9 +91,9 @@ if uploaded_file is not None:
         st.error(f"Error loading file: {e}")
         st.stop()
 
-    # =========================================================
-    # STANDARDIZE COLUMN NAMES
-    # =========================================================
+    # ---------------------------------------------------------
+    # STANDARDIZE COLUMNS
+    # ---------------------------------------------------------
 
     raw_df.columns = (
         raw_df.columns
@@ -103,9 +102,9 @@ if uploaded_file is not None:
         .str.replace(" ", "_")
     )
 
-    # =========================================================
+    # ---------------------------------------------------------
     # REMOVE DUPLICATE INCIDENT
-    # =========================================================
+    # ---------------------------------------------------------
 
     disposition_col = next(
         (col for col in raw_df.columns if "disposition" in col),
@@ -120,9 +119,9 @@ if uploaded_file is not None:
             .str.contains("duplicate incident", na=False)
         ]
 
-    # =========================================================
-    # SELECT DATA LAYER
-    # =========================================================
+    # ---------------------------------------------------------
+    # SELECT LAYER
+    # ---------------------------------------------------------
 
     layer = st.radio(
         "Select Data Layer",
@@ -176,9 +175,9 @@ if uploaded_file is not None:
         "text/csv"
     )
 
-    # =========================================================
+    # ---------------------------------------------------------
     # EVENT LOG
-    # =========================================================
+    # ---------------------------------------------------------
 
     event_cols = [
         "incident_id",
